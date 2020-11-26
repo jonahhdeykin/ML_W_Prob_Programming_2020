@@ -18,4 +18,13 @@ class MM(ForecastingModel):
 		obs_matrix = torch.tensor([[1.]])
 		trans_dist = dist.Normal(0,10).to_event(1)
 		trans_matrix = torch.tensor([[1.]])
-		pre_dist = dist.GaussianHMM(init_dist,trans_matrix, trans_dist, obs_matrix, obs_dist, duration) 		
+		pre_dist = dist.GaussianHMM(init_dist,trans_matrix, trans_dist, obs_matrix, obs_dist, duration)
+		prediction = pyro.sample("prediction", dist.Normal(0, 10).expand([1]).to_event(1))
+		self.predict(pre_dist, prediction)
+	
+
+
+
+def main():
+	data = torch.load('data.pt')
+	print(data)		

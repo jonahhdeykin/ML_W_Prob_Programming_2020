@@ -25,22 +25,26 @@ class DDBL(nn.Module):
 		def __init__(self, dims):
 			super(DDBL, self).__init__()
 
-			self.weights = dict()
+			self.weights = nn.ModuleList()
 			self.n_layers = len(dims)
 			for i in range(0, len(dims) - 1):
-				self.weights['fc_{}'.format(i+1)] = nn.Linear(dims[i], dims[i+1])
+				self.weights.append(nn.Linear(dims[i], dims[i+1]))
 
-			self.weights['fc_{}'.format(len(dims))] = nn.Linear(dims[-1], 1)
+			self.weights.append(nn.Linear(dims[-1], 1))
 			
 
 
 		def forward(self, x):
 			x = torch.transpose(x, 0, 1)
 			for i in range(0, self.n_layers-1):
-				x = torch.relu(self.weights['fc_{}'.format(i+1)](x))
-			x = self.weights['fc_{}'.format(self.n_layers)](x)
+				x = torch.relu(self.weights[i](x))
+			x = self.weights[-1](x)
 
 			return x
+
+
+		def get_params(self):
+			return(list(self.parameters()))
 
 		def update_params(self, difs):
 			i = 0
@@ -110,20 +114,8 @@ class DTSBN():
 		return (torch.bernoulli(self.sig(torch.matmul(self.weights_dict['u_{}'.format(3*index + 1)], h_p) + torch.matmul(self.weights_dict['u_{}'.format(3*index + 1)], v) 
 			+ torch.matmul(self.weights_dict['u_{}'.format(3*(index + 1))], v_p) + self.weights_dict['c_{}'.format(index + 1)])))
 
-	
-	
 
-	def compute_grads_net(self, pred, actual, DDBL_net, criterion):
-		DDBL_net.zero_grad()
-		loss = criterion(pred, actual)
-		loss.backward()
-		derivs = []
-		for f in DDBL_net.parameters():
-			derivs.append(f.grad.data)
-		return derivs, loss.item()
-
-
-	def compute_grads(self, x_list, DDBL_net, criterion):
+	def compute_grads(self, x_list, DDBL_net, criterion, optimizer):
 		with torch.no_grad():
 			states = []
 
@@ -262,21 +254,21 @@ class DTSBN():
 			ll = torch.add(lpr, torch.sub(logl, lps)).detach()
 			o_ll = torch.zeros((1, x_list.size()[1])).detach()
 			o_ll[0] = torch.clone(ll)
-
 			lb = torch.mean(ll)
+
+		#optimizer.zero_grad()
 		preds = DDBL_net(x_list)
-		ll = torch.sub(ll, torch.transpose(preds, 0, 1))
-			
-		DDBL_net.zero_grad()
 		loss = criterion(torch.transpose(preds, 0, 1), o_ll)
-
+		DDBL_net.zero_grad()
+		loss.backward()
+		#optimizer.step()
 		
-		loss.backward(retain_graph=True)
-		net_derivs = []
-		for f in DDBL_net.parameters():
-			net_derivs.append(torch.div(f.grad.data, x_list.size()[1]))
 		with torch.no_grad():
+			net_derivs = []
+			for f in DDBL_net.parameters():
+				 net_derivs.append(f.grad.data)
 
+			ll = torch.sub(ll, torch.transpose(preds, 0, 1))
 			loss = loss.item()
 			l_loss = torch.mean(ll)
 			if self.c is not None:
@@ -387,7 +379,7 @@ class DTSBN():
 
 	
 
-def Adam(DTSBN, DDBL, data, criterion, batch_size = 50, epochs=75, alpha = 0.0001, beta_1 = 0.9, beta_2 = 0.999, eta = 1e-8, t_max = None, Noisy = True):
+def Adam(DTSBN, DDBL, data, criterion, optimizer, batch_size = 50, epochs=75, alpha = 0.0001, beta_1 = 0.9, beta_2 = 0.999, eta = 1e-8, t_max = None, Noisy = True):
 	ends = [(i*50, i*50+batch_size) for i in range(0, int(data.size()[1]/batch_size))]
 	ends.append((int(data.size()[1]/batch_size)*50, data.size()[1]))
 	first_pass = True
@@ -400,39 +392,38 @@ def Adam(DTSBN, DDBL, data, criterion, batch_size = 50, epochs=75, alpha = 0.000
 			for j in range(0, len(ends)):
 				t += 1
 				
-				DTSBN_derivs, DDBL_derivs, c, loss = DTSBN.compute_grads(data[:,ends[j][0]:ends[j][1]], DDBL, criterion)
+				DTSBN_derivs, DDBL_derivs, c, loss = DTSBN.compute_grads(data[:,ends[j][0]:ends[j][1]], DDBL, criterion, optimizer)
 				e_loss += c * (ends[j][1] - ends[j][0] - 1)
 				if Noisy:
 					print('epoch {}/{}, example {}/{} DTSBN Loss: {}, DDBL Loss: {}'.format(e+1, epochs, j+1, len(ends), c.item(), loss))
 				with torch.no_grad():
 					if first_pass:
 						m_DTSBN = dict()
-						m_DDBL = []
-
 						v_DTSBN = dict()
+
+						m_DDBL = []
 						v_DDBL = []
 
 						for key in DTSBN_derivs:
 							m_DTSBN[key] = torch.zeros(DTSBN_derivs[key].size())
 							v_DTSBN[key] = torch.zeros(DTSBN_derivs[key].size())
 
-						for i in range(0, len(DDBL_derivs)):
-							m_DDBL.append(torch.zeros(DDBL_derivs[i].size()))
-							v_DDBL.append(torch.zeros(DDBL_derivs[i].size()))
+						for deriv in DDBL_derivs:
+							m_DDBL.append(torch.zeros(deriv.size()))
+							v_DDBL.append(torch.zeros(deriv.size()))
+
 						first_pass = False
 
 
 					for key in m_DTSBN:
 						m_DTSBN[key] = torch.add(torch.mul(m_DTSBN[key], beta_1), torch.mul(DTSBN_derivs[key], (1-beta_1)))
-
-					for key in v_DTSBN:
 						v_DTSBN[key] = torch.add(torch.mul(v_DTSBN[key], beta_2), torch.mul(torch.square(DTSBN_derivs[key]), (1-beta_2)))
 
-					for i in range(0, len(m_DDBL)):
+					for i in range(0, len(DDBL_derivs)):
 						m_DDBL[i] = torch.add(torch.mul(m_DDBL[i], beta_1), torch.mul(DDBL_derivs[i], (1-beta_1)))
-
-					for i in range(0, len(v_DDBL)):
 						v_DDBL[i] = torch.add(torch.mul(v_DDBL[i], beta_2), torch.mul(torch.square(DDBL_derivs[i]), (1-beta_2)))
+						
+
 
 					alpha_t = alpha*math.sqrt(1-math.pow(beta_2, t))/(1-math.pow(beta_1, t))
 
@@ -440,16 +431,14 @@ def Adam(DTSBN, DDBL, data, criterion, batch_size = 50, epochs=75, alpha = 0.000
 					difs_DDBL = []
 
 					for key in m_DTSBN:
-						
 						difs_DTSBN[key] = torch.mul(torch.div(m_DTSBN[key], torch.add(torch.sqrt(torch.abs(v_DTSBN[key].detach())), eta)), alpha_t)
-
-					for i in range(0, len(m_DDBL)):
-						difs_DDBL.append(torch.mul(torch.div(m_DDBL[i], torch.add(torch.sqrt(v_DDBL[i]), eta)), alpha_t))
-
 					
+					for i in range(0, len(DDBL_derivs)):
+						difs_DDBL.append(torch.mul(torch.div(m_DDBL[i], torch.add(torch.sqrt(torch.abs(v_DDBL[i].detach())), eta)), alpha_t))
 
 					DTSBN.update_params(difs_DTSBN)
 					DDBL.update_params(difs_DDBL)
+
 			e_loss = e_loss/data.size()[1]
 			print("epoch {} average loss: {}".format(e+1, e_loss))
 			epoch_losses.append(e_loss)
@@ -466,43 +455,38 @@ def Adam(DTSBN, DDBL, data, criterion, batch_size = 50, epochs=75, alpha = 0.000
 				
 
 				t += 1
-				
-				DTSBN_derivs, DDBL_derivs, c, loss = DTSBN.compute_grads(data[:,ends[j][0]:ends[j][1]], DDBL, criterion)
+				DTSBN_derivs, DDBL_derivs, c, loss = DTSBN.compute_grads(data[:,ends[j][0]:ends[j][1]], DDBL, criterion, optimizer)
 				epoch_losses_current[j] = c * (ends[j][1] - ends[j][0] - 1)
-				
-
 				if Noisy:
-					print('epoch {}, example {}/{} DTSBN Loss: {}, DDBL Loss: {}'.format(e+1, j+1, len(ends), c.item(), loss))
-
+					print('epoch {}/{}, example {}/{} DTSBN Loss: {}, DDBL Loss: {}'.format(e+1, epochs, j+1, len(ends), c.item(), loss))
 				with torch.no_grad():
 					if first_pass:
 						m_DTSBN = dict()
-						m_DDBL = []
-
 						v_DTSBN = dict()
+
+						m_DDBL = []
 						v_DDBL = []
 
 						for key in DTSBN_derivs:
 							m_DTSBN[key] = torch.zeros(DTSBN_derivs[key].size())
 							v_DTSBN[key] = torch.zeros(DTSBN_derivs[key].size())
 
-						for i in range(0, len(DDBL_derivs)):
-							m_DDBL.append(torch.zeros(DDBL_derivs[i].size()))
-							v_DDBL.append(torch.zeros(DDBL_derivs[i].size()))
+						for deriv in DDBL_derivs:
+							m_DDBL.append(torch.zeros(deriv.size()))
+							v_DDBL.append(torch.zeros(deriv.size()))
+
 						first_pass = False
 
 
 					for key in m_DTSBN:
 						m_DTSBN[key] = torch.add(torch.mul(m_DTSBN[key], beta_1), torch.mul(DTSBN_derivs[key], (1-beta_1)))
-
-					for key in v_DTSBN:
 						v_DTSBN[key] = torch.add(torch.mul(v_DTSBN[key], beta_2), torch.mul(torch.square(DTSBN_derivs[key]), (1-beta_2)))
 
-					for i in range(0, len(m_DDBL)):
+					for i in range(0, len(DDBL_derivs)):
 						m_DDBL[i] = torch.add(torch.mul(m_DDBL[i], beta_1), torch.mul(DDBL_derivs[i], (1-beta_1)))
-
-					for i in range(0, len(v_DDBL)):
 						v_DDBL[i] = torch.add(torch.mul(v_DDBL[i], beta_2), torch.mul(torch.square(DDBL_derivs[i]), (1-beta_2)))
+						
+
 
 					alpha_t = alpha*math.sqrt(1-math.pow(beta_2, t))/(1-math.pow(beta_1, t))
 
@@ -510,17 +494,13 @@ def Adam(DTSBN, DDBL, data, criterion, batch_size = 50, epochs=75, alpha = 0.000
 					difs_DDBL = []
 
 					for key in m_DTSBN:
-						
-						difs_DTSBN[key] = torch.mul(torch.div(m_DTSBN[key], torch.add(torch.sqrt(torch.abs(v_DTSBN[key].detach())), eta)), alpha_t)
-
-					for i in range(0, len(m_DDBL)):
-						difs_DDBL.append(torch.mul(torch.div(m_DDBL[i], torch.add(torch.sqrt(v_DDBL[i]), eta)), alpha_t))
-
+						difs_DTSBN[key] = torch.mul(torch.div(m_DTSBN[key], torch.add(torch.sqrt(torch.abs(v_DTSBN[key])), eta)), alpha_t)
 					
+					for i in range(0, len(DDBL_derivs)):
+						difs_DDBL.append(torch.mul(torch.div(m_DDBL[i], torch.add(torch.sqrt(torch.abs(v_DDBL[i].detach())), eta)), alpha_t))
 
 					DTSBN.update_params(difs_DTSBN)
 					DDBL.update_params(difs_DDBL)
-
 
 				if e == 0:
 					epoch_loss = torch.sum(epoch_losses_current).item()/ends[j][1]
@@ -570,7 +550,10 @@ def hyperband(budget, ranges, eta, data):
 			DDBL_net = DDBL(dims)
 			dims.reverse()
 			DTSBN_net = DTSBN(dims, int(config[1]), int(config[2]))
-			configs.append([0, (DTSBN_net, DDBL_net), config])
+
+			configs.append([0, (DTSBN_net, DDBL_net, optim.Adam(DDBL_net.get_params(), lr=0.0001)), config])
+
+
 
 		for i in range(0, s+1):
 			n_i = math.floor(n*eta**-i)
@@ -579,7 +562,7 @@ def hyperband(budget, ranges, eta, data):
 			for config in configs:
 				tot += r_i
 
-				loss = Adam(config[1][0], config[1][1], data, nn.MSELoss(), t_max=r_i*60, Noisy = False)
+				loss = Adam(config[1][0], config[1][1], data, nn.MSELoss(), config[1][2], t_max=r_i*60, Noisy = False)
 				new_configs.append([loss, config[1], config[2]])
 
 			new_configs.sort(key=lambda x: -x[0])
@@ -588,13 +571,15 @@ def hyperband(budget, ranges, eta, data):
 			configs = new_configs[:max(1, math.floor(n_i/eta))]
 
 			print(i, s, s_max)
+			if len(configs) == 1:
+				break
 
 		best_configs[s_max-s][0] = configs[0][0]
 		best_configs[s_max-s][1] = configs[0][2][0]
 		best_configs[s_max-s][2] = configs[0][2][1]
 		best_configs[s_max-s][3] = configs[0][2][2]
 
-	print(tot)
+
 	return(best_configs)
 
 
@@ -631,7 +616,9 @@ class bayesian_op():
 			dims.reverse()
 			DTSBN_net = DTSBN(dims, int(configs[1]), int(configs[2]))
 
-			y[j] = Adam(DTSBN_net, DDBL_net, self.data, nn.MSELoss(), t_max = self.time_limit, Noisy = False)
+			optimizer = optim.Adam(list(DDBL_net.parameters()), lr=0.0001)
+			y[j] = Adam(DTSBN_net, DDBL_net, self.data, nn.MSELoss(), optimizer, t_max = self.time_limit, Noisy = False)
+			print('warmup step {}/{}'.format(j+1, warmup))
 		self.gpmodel = gp.models.GPRegression(X, y, gp.kernels.Matern52(input_dim=3),
 								 noise=torch.tensor(0.1), jitter=1.0e-4)
 
@@ -639,7 +626,7 @@ class bayesian_op():
 		for j in range(0, bayesian):
 			x_min = self.next_x()
 			self.update_posterior(x_min)
-
+			print('bayesian step {}/{}'.format(j+1, bayesian))
 
 		return (self.gpmodel.X, self.gpmodel.y)
 
@@ -658,9 +645,10 @@ class bayesian_op():
 		DDBL_net = DDBL(dims)
 		dims.reverse()
 		DTSBN_net = DTSBN(dims, int(configs[1]), int(configs[2]))
+		optimizer = optim.Adam(list(DDBL_net.parameters()), lr=0.0001)
 
 		
-		y = torch.tensor(Adam(DTSBN_net, DDBL_net, self.data, nn.MSELoss(), t_max = self.time_limit, Noisy = False))
+		y = torch.tensor(Adam(DTSBN_net, DDBL_net, self.data, nn.MSELoss(), optimizer, t_max = self.time_limit, Noisy = False))
 		x_fix = torch.zeros((1, 3))
 		x_fix[0] = x_new
 		X = torch.cat([self.gpmodel.X, x_fix])
@@ -669,6 +657,7 @@ class bayesian_op():
 		y = torch.cat([self.gpmodel.y, y_fix])
 
 		self.gpmodel.set_data(X, y)
+
 		# optimize the GP hyperparameters using Adam with lr=0.001
 		optimizer = torch.optim.Adam(self.gpmodel.parameters(), lr=0.001)
 		gp.util.train(self.gpmodel, optimizer)
@@ -728,15 +717,14 @@ if __name__ == '__main__':
 	data = torch.load('data.pt')
 
 	data = data[:, 0:int(data.size()[1]*2/3)]
-
 	
-	candidates = hyperband(27, ((1, 10), (1, 6), (1, 6)), 3, data)
+	candidates = hyperband(54, ((1, 10), (1, 6), (1, 6)), 3, data)
 
-	torch.save(candidates, 'hyperband.pt')
+	torch.save(candidates, 'hyperband_2.pt')
 	bayesian = bayesian_op()
-	candidates = bayesian.run( ((1, 10), (1, 6), (1, 6)), data, 7, 13, 1260)
+	candidates = bayesian.run( ((1, 10), (1, 6), (1, 6)), data, 7, 13, 2538)
 
-	torch.save(candidates, 'bayesian_op.pt')
+	torch.save(candidates, 'bayesian_op_2.pt')
 	
 
 	

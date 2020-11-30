@@ -221,12 +221,3 @@ def make_mark_cap(inpath_prices, inpath_cap):
         pickle.dump(ticks, f)
 
     return cap_data
-
-
-if __name__ == '__main__':
-    '''
-    data = read_in_data('archive/all_stocks_5yr.csv')
-    torch.save(data, 'data.pt')
-    '''
-    cap_data = make_mark_cap('archive/all_stocks_5yr.csv', 'market_cap.csv')
-    torch.save(cap_data, 'm_cap.pt')

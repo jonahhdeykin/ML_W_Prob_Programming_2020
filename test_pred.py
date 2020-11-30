@@ -1,4 +1,3 @@
-import DTSBN
 import torch
 import pickle
 import matplotlib.pyplot as plt
@@ -43,7 +42,7 @@ def sample_n_forward(DTSBN_net, data_path, split, n_reps, n_forward,
                      steps_back):
     data = torch.load(data_path)
     test_data = data[:, split:]
-
+    dims = DTSBN_net.dims
     samples = torch.zeros((test_data.size()[0], test_data.size()[1] -
                            n_forward, n_forward, n_reps))
     for rep in range(0, n_reps):
@@ -87,7 +86,7 @@ def sample_n_forward(DTSBN_net, data_path, split, n_reps, n_forward,
     return samples
 
 
-def generate_prices(samples, real_prices_path, recovery_info_path):
+def generate_prices(samples, real_prices_path, recovery_info_path, n_forward):
     with open(recovery_info_path, 'rb') as f:
         recovery_info = pickle.load(f)
     real_prices = torch.load(real_prices_path)
@@ -176,8 +175,8 @@ def graph_rets(actual_d, data_recovery_path, DTSBN_net, n_preds, n_forward):
     for comp in range(0, len(data_recov)):
 
         actual[comp] = torch.add(torch.mul(actual[comp],
-                                               data_recov[comp][1]),
-                                     data_recov[comp][0])
+                                           data_recov[comp][1]),
+                                 data_recov[comp][0])
         preds[comp] = torch.add(torch.mul(preds[comp], data_recov[comp][1]),
                                 data_recov[comp][0])
 
@@ -321,28 +320,3 @@ def graph_prob(predicted, actual, level, dates, n_forward):
     ax1.legend(ls, labs, bbox_to_anchor=(1.07, 1), loc='upper left')
     fig.tight_layout()
     plt.show()
-
-if __name__ == '__main__':
-
-    graph_rets(data[:,int(data.size()[1]*2/3):], 'data_recovery.txt', DTSBN_net, 1100, n_forward)
-
-    samples = sample_n_forward(DTSBN_net, 'data.pt', int(data.size()[1]*2/3), n_reps, n_forward, steps_back)
-
-    prices = generate_prices(samples, 'unnormalized_data.pt', 'data_recovery.txt')
-
-    predicted, actual = check_val_weighted_return('unnormalized_data.pt', prices, n_forward, 'm_cap.pt', 'price_index_list.txt', 'size_index_list.txt')
-
-    means = torch.mean(predicted, 1)
-
-    count = 0
-
-    for i in range(0, means.size()[0]):
-        if means[i].item() * actual[i].item() > 0:
-            count += 1
-
-    print(count/means.size()[0])
-    with open('dates.txt', 'rb') as f:
-        dates = pickle.load(f)
-    graph_change(predicted, actual,  dates, n_forward)
-
-

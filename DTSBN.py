@@ -11,7 +11,7 @@ import pickle
 import time
 import numpy as np
 
-
+#The data dependent baseline for gradient noise reduction
 class DDBL(nn.Module):
     def __init__(self, dims):
         super(DDBL, self).__init__()
@@ -40,7 +40,7 @@ class DDBL(nn.Module):
             f.data.sub_(difs[i])
             i += 1
 
-
+#The deep temporal sigmoid belief network
 class DTSBN():
 
     def __init__(self, dims, n_layers, num_steps_back):
@@ -716,7 +716,7 @@ def Adam(DTSBN, DDBL, data, criterion, batch_size=50, epochs=75, alpha=0.0001,
                                                        criterion))
                 e_loss += c * (ends[j][1] - ends[j][0])
 
-                for key in DDBL_derivs:
+                for key in DTSBN_derivs:
                     DTSBN_derivs[key] = torch.mul(DTSBN_derivs[key],
                                                   (ends[j][1] - ends[j][0])
                                                   / batch_size)
@@ -800,7 +800,8 @@ def Adam(DTSBN, DDBL, data, criterion, batch_size=50, epochs=75, alpha=0.0001,
                     DDBL.update_params(difs_DDBL)
 
             e_loss = e_loss/data.size()[1]
-            print("epoch {} average loss: {}".format(e+1, e_loss))
+            print("epoch {}/{} average log likelihood: {}".format(e+1, epochs,
+                                                                  e_loss))
             epoch_losses.append(e_loss)
         return epoch_losses
     else:
@@ -921,7 +922,7 @@ def Adam(DTSBN, DDBL, data, criterion, batch_size=50, epochs=75, alpha=0.0001,
 
             e += 1
 
-            print("epoch {} average loss: {}".format(e, epoch_loss))
+            print("epoch {} average log likelihood: {}".format(e, epoch_loss))
 
         return epoch_loss
 
@@ -1117,10 +1118,33 @@ if __name__ == '__main__':
 
     torch.save(candidates, 'bayesian_op_3.pt')
     '''
+    best = []
+    best_loss = -5000
+    for nl in range(1, 4):
+        for fac in range(1, 4):
+            dims = [1404]
+            for _ in range(0, nl):
+                dims.append(max(1, int(dims[-1] /fac)))
+            DDBL_net = DDBL(dims)
+            dims.reverse()
+            DTSBN_net = DTSBN(dims, nl, 1)
+            data = torch.load('data.pt')
+            train_data = data[:, :int(data.size()[1]*2/3)]
+            l = Adam(DTSBN_net, DDBL_net, train_data, nn.MSELoss(), t_max = 1200, Noisy=False)
+            if l > best_loss:
+                best = [fac, nl, 1]
+
+    with open('grid_final.txt', 'wb') as f:
+        pickle.dump(best, f)
+
 
     configs_bayes = torch.load('bayesian_op_3.pt')
     _, sorted_indicies = torch.sort(configs_bayes[1])
+
+
+
     rs = [(1, 10), (1, 6), (1, 6)]
+
 
     best_configs = sorted_indicies[-1].item()
     configs = [(configs_bayes[0][best_configs][i].item() * (rs[i][1]- rs[i][0])) + rs[i][0] for i in range(0, len(rs))]
@@ -1139,7 +1163,7 @@ if __name__ == '__main__':
     data = torch.load('data.pt')
     train_data = data[:, :int(data.size()[1]*2/3)]
 
-    train_time = 40*60
+    train_time = 90*60
     Adam(DTSBN_net, DDBL_net, train_data, nn.MSELoss(), t_max = train_time, Noisy=False)
     DTSBN_net.save_model('Bayes_op_model_DTSBN.pt')
     torch.save(DDBL_net.state_dict(), 'Bayes_op_model_DDBL.pt')
@@ -1164,7 +1188,36 @@ if __name__ == '__main__':
     data = torch.load('data.pt')
     train_data = data[:, :int(data.size()[1]*2/3)]
 
-    train_time = 40*60
+    train_time = 90*60
     Adam(DTSBN_net, DDBL_net, train_data, nn.MSELoss(), t_max = train_time, Noisy=False)
     DTSBN_net.save_model('Hyper_op_model_DTSBN.pt')
     torch.save(DDBL_net.state_dict(), 'Hyper_op_model_DDBL.pt')
+
+    with open('grid_final.txt', 'rb') as f:
+        configs_grid = pickle.load(f)
+    dims = [1404]
+    for _ in range(0, configs_grid[1]):
+        dims.append(max(1, int(dims[-1] /configs_grid[0])))
+    DDBL_net = DDBL(dims)
+    dims.reverse()
+    DTSBN_net = DTSBN(dims, configs_grid[1], 1)
+
+    data = torch.load('data.pt')
+    train_data = data[:, :int(data.size()[1]*2/3)]
+    print('GRID START')
+    Adam(DTSBN_net, DDBL_net, train_data, nn.MSELoss(), t_max = 90*60, Noisy=False)
+    DTSBN_net.save_model('Grid_op_model_DTSBN.pt')
+    torch.save(DDBL_net.state_dict(), 'Grid_op_model_DDBL.pt')
+    print('GRID END')
+    dims=[1404, 1404]
+    DDBL_net = DDBL(dims)
+    DTSBN_net = DTSBN(dims, 1, 1)
+    data = torch.load('data.pt')
+    train_data = data[:, :int(data.size()[1]*2/3)]
+
+    Adam(DTSBN_net, DDBL_net, train_data, nn.MSELoss(), t_max = 90*60, Noisy=False)
+    DTSBN_net.save_model('Base_model_DTSBN.pt')
+    torch.save(DDBL_net.state_dict(), 'Base_model_DDBL.pt')
+
+
+

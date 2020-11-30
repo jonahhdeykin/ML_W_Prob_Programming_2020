@@ -159,7 +159,9 @@ def check_val_weighted_return(actual_path, predictions, n_forward, m_cap_path,
     return predicted_level, level_change
 
 
-def graph_rets(actual, data_recovery_path, DTSBN_net, n_preds, n_forward):
+def graph_rets(actual_d, data_recovery_path, DTSBN_net, n_preds, n_forward):
+
+    actual = actual_d.clone()
     with open(data_recovery_path, 'rb') as f:
         data_recov = pickle.load(f)
 
@@ -172,7 +174,7 @@ def graph_rets(actual, data_recovery_path, DTSBN_net, n_preds, n_forward):
 
     for comp in range(0, len(data_recov)):
 
-        train_data[comp] = torch.add(torch.mul(train_data[comp],
+        actual[comp] = torch.add(torch.mul(actual[comp],
                                                data_recov[comp][1]),
                                      data_recov[comp][0])
         preds[comp] = torch.add(torch.mul(preds[comp], data_recov[comp][1]),
@@ -184,10 +186,10 @@ def graph_rets(actual, data_recovery_path, DTSBN_net, n_preds, n_forward):
     for comp in range(0, len(data_recov)):
         if comp % 3 == 0:
 
-            for start in range(0, train_data.size()[1]+1-n_forward):
+            for start in range(0, actual.size()[1]+1-n_forward):
                 r = 1
                 for day in range(0, n_forward):
-                    r = r*(train_data[comp][start+day].item() + 1)
+                    r = r*(actual[comp][start+day].item() + 1)
                 real_rets.append(r-1)
 
             for start in range(0, preds.size()[1]+1-n_forward):
@@ -206,8 +208,9 @@ def graph_rets(actual, data_recovery_path, DTSBN_net, n_preds, n_forward):
     plt.show()
 
 
-def graph_vars(actual, data_recovery_path, DTSBN_net, n_preds, n_forward):
+def graph_vars(actual_d, data_recovery_path, DTSBN_net, n_preds, n_forward):
 
+    actual = actual_d.clone()
     with open(data_recovery_path, 'rb') as f:
         data_recov = pickle.load(f)
 
@@ -220,9 +223,9 @@ def graph_vars(actual, data_recovery_path, DTSBN_net, n_preds, n_forward):
 
     for comp in range(0, len(data_recov)):
 
-        train_data[comp] = torch.add(torch.mul(train_data[comp],
-                                               data_recov[comp][1]),
-                                     data_recov[comp][0])
+        actual[comp] = torch.add(torch.mul(actual[comp],
+                                           data_recov[comp][1]),
+                                 data_recov[comp][0])
         preds[comp] = torch.add(torch.mul(preds[comp], data_recov[comp][1]),
                                 data_recov[comp][0])
 
@@ -233,10 +236,10 @@ def graph_vars(actual, data_recovery_path, DTSBN_net, n_preds, n_forward):
         if comp % 3 == 0:
             r_l = []
             g_l = []
-            for start in range(0, train_data.size()[1]+1-n_forward):
+            for start in range(0, actual.size()[1]+1-n_forward):
                 r = 1
                 for day in range(0, n_forward):
-                    r = r*(train_data[comp][start+day].item() + 1)
+                    r = r*(actual[comp][start+day].item() + 1)
                 r_l.append(r-1)
             real_vars.append(torch.var(torch.tensor(r_l)).item())
             for start in range(0, preds.size()[1]+1-n_forward):

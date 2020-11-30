@@ -1,200 +1,232 @@
 import pandas as pd
-import torch 
-import datetime
-import csv
-import pickle 
+import torch
+import pickle
+import math
+
 
 def read_in_data(inpath):
-	df = pd.read_csv(inpath)
-	d1 = df.groupby(['Name'])['date'].max()
-	d1 = d1[d1 == '2018-02-07'].index
-	d2 = df.groupby(['Name'])['date'].min()
-	d2 = d2[d2 == '2013-02-08'].index
+    df = pd.read_csv(inpath)
+    d1 = df.groupby(['Name'])['date'].max()
+    d1 = d1[d1 == '2018-02-07'].index
+    d2 = df.groupby(['Name'])['date'].min()
+    d2 = d2[d2 == '2013-02-08'].index
 
-	ticks = [ticker for ticker in d1 if ticker in d2]
+    ticks = [ticker for ticker in d1 if ticker in d2]
 
-	dates_list = []
-	for date in df['date'].unique():
-		dates_list.append(date)
+    dates_list = []
+    for date in df['date'].unique():
+        dates_list.append(date)
+    dates_list.sort()
 
-	dates_list.sort()
-	
+    data_temp = torch.zeros((4*len(ticks)), len(dates_list))
+    t = 0
+    failed = 0
+    for ticker in ticks:
 
-	data_temp = torch.zeros((4*len(ticks)), len(dates_list))
+        try:
+            data_temp[4*t] = torch.tensor(df.loc[(df['Name'] == ticker)]
+                                          ['close'].values)
+            data_temp[4*t+1] = torch.tensor(df.loc[(df['Name'] == ticker)]
+                                            ['high'].values)
+            data_temp[4*t+2] = torch.tensor(df.loc[(df['Name'] == ticker)]
+                                            ['low'].values)
+            data_temp[4*t+3] = torch.tensor(df.loc[(df['Name'] == ticker)]
+                                            ['volume'].values)
 
-	t = 0
-	for ticker in ticks:
-		try:
-			data_temp[4*t] = torch.tensor(df.loc[(df['Name'] == ticker)]['close'].values)
-			data_temp[4*t+1] = torch.tensor(df.loc[(df['Name'] == ticker)]['high'].values)
-			data_temp[4*t+2] = torch.tensor(df.loc[(df['Name'] == ticker)]['low'].values)
-			data_temp[4*t+3] = torch.tensor(df.loc[(df['Name'] == ticker)]['volume'].values)
-		
-			print(t)
-			t+=1
-		except:
-			continue
+            print(t)
+            t += 1
 
-	print(t)
+        except Exception:
+            failed += 1
 
+    print(t)
 
-	data_temp = data_temp[0:t*4]
-	bad_rows = data_temp.isnan().nonzero()
-	restricted_set = set()
-	for r in enumerate(bad_rows):
-		restricted_set.add(int(r[1][0].item()/4))
-		
+    data_temp = data_temp[0:t*4]
+    bad_rows = data_temp.isnan().nonzero()
+    restricted_set = set()
+    for r in enumerate(bad_rows):
+        restricted_set.add(int(r[1][0].item()/4))
 
+    data_temp2 = torch.zeros((int(data_temp.size()[0] * 3/4) -
+                              len(restricted_set) * 3, data_temp.size()[1]))
 
-	data_temp2 = torch.zeros((int(data_temp.size()[0]*3/4)-len(restricted_set)*3, data_temp.size()[1] ))
-	
-	c_prime = 0
-	for c in range(0, t):
-		if c not in restricted_set:
+    c_prime = 0
+    for c in range(0, t):
+        if c not in restricted_set:
 
-			data_temp2[3*c_prime] = data_temp[4*c]
-			data_temp2[3*c_prime+1] = torch.sub(data_temp[4*c+1], data_temp[4*c+2])
-			data_temp2[3*c_prime+2] = data_temp[4*c+3]
-			c_prime += 1
+            data_temp2[3*c_prime] = data_temp[4*c]
+            data_temp2[3*c_prime+1] = torch.sub(data_temp[4*c+1],
+                                                data_temp[4*c+2])
+            data_temp2[3*c_prime+2] = data_temp[4*c+3]
+            c_prime += 1
 
-	data = torch.zeros((data_temp2.size()[0], data_temp2.size()[1]-1 ))
-	for p in range(1, data_temp2.size()[1]):
-		data[:, p-1] = torch.div(torch.sub(data_temp2[:,p], data_temp2[:,p-1]), data_temp2[:,p-1])
+    data = torch.zeros((data_temp2.size()[0], data_temp2.size()[1]-1))
 
+    for p in range(1, data_temp2.size()[1]):
+        data[:, p-1] = torch.div(torch.sub(data_temp2[:, p],
+                                 data_temp2[:, p-1]), data_temp2[:, p-1])
 
-	for c in range(0, data.size()[0]):
-		data[c] = torch.div(torch.sub(data[c], torch.mean(data[c])), 100*torch.var(data[c]))
+    data_recovery = []
+    for c in range(0, data.size()[0]):
+        data_recovery.append([torch.mean(data[c]), 100*torch.var(data[c])])
 
+        data[c] = torch.div(torch.sub(data[c], torch.mean(data[c])),
+                            100*torch.var(data[c]))
 
-	bad_rows = data.isnan().nonzero()
-	
+    with open('data_recovery.txt', 'wb') as f:
+        pickle.dump(data_recovery, f)
 
-	return data
+    return data
+
 
 def make_mark_cap(inpath_prices, inpath_cap):
 
-	df = pd.read_csv(inpath_prices)
-	d1 = df.groupby(['Name'])['date'].max()
-	d1 = d1[d1 == '2018-02-07'].index
-	d2 = df.groupby(['Name'])['date'].min()
-	d2 = d2[d2 == '2013-02-08'].index
+    df = pd.read_csv(inpath_prices)
+    d1 = df.groupby(['Name'])['date'].max()
+    d1 = d1[d1 == '2018-02-07'].index
+    d2 = df.groupby(['Name'])['date'].min()
+    d2 = d2[d2 == '2013-02-08'].index
 
-	ticks = [ticker for ticker in d1 if ticker in d2]
+    ticks = [ticker for ticker in d1 if ticker in d2]
 
-	dates_list = []
-	for date in df['date'].unique():
-		dates_list.append(date)
+    dates_list = []
+    for date in df['date'].unique():
+        dates_list.append(date)
 
-	dates_list.sort()
-	
-	data_temp = torch.zeros((4*len(ticks)), len(dates_list))
+    dates_list.sort()
 
-	removal_list = []
-	t = 0
-	for ticker in ticks:
-		try:
-			data_temp[4*t] = torch.tensor(df.loc[(df['Name'] == ticker)]['close'].values)
-			data_temp[4*t+1] = torch.tensor(df.loc[(df['Name'] == ticker)]['high'].values)
-			data_temp[4*t+2] = torch.tensor(df.loc[(df['Name'] == ticker)]['low'].values)
-			data_temp[4*t+3] = torch.tensor(df.loc[(df['Name'] == ticker)]['volume'].values)
-		
-			
-			t+=1
-			print(t)
-		except:
-			removal_list.append(ticker)
+    data_temp = torch.zeros((4*len(ticks)), len(dates_list))
 
-	ticks = [ticker for ticker in ticks if ticker not in removal_list]
-	data_temp = data_temp[0:t*4]
-	bad_rows = data_temp.isnan().nonzero()
-	restricted_set = set()
+    removal_list = []
+    t = 0
+    for ticker in ticks:
+        try:
+            data_temp[4*t] = torch.tensor(df.loc[(df['Name'] == ticker)]
+                                          ['close'].values)
+            data_temp[4*t+1] = torch.tensor(df.loc[(df['Name'] == ticker)]
+                                            ['high'].values)
+            data_temp[4*t+2] = torch.tensor(df.loc[(df['Name'] == ticker)]
+                                            ['low'].values)
+            data_temp[4*t+3] = torch.tensor(df.loc[(df['Name'] == ticker)]
+                                            ['volume'].values)
 
-	for r in enumerate(bad_rows):
-		restricted_set.add(int(r[1][0].item()/4))
+            t += 1
+            print(t)
+        except Exception:
+            removal_list.append(ticker)
 
-	restricted_list = list(restricted_set)
-	restricted_list.sort()
-	temp_ticks = []
-	temp_ticks += ticks[:restricted_list[0]]
-	for r in range(1, len(restricted_list)):
-		temp_ticks += ticks[restricted_list[r-1]+1:restricted_list[r]]
+    ticks = [ticker for ticker in ticks if ticker not in removal_list]
+    data_temp = data_temp[0:t*4]
+    bad_rows = data_temp.isnan().nonzero()
+    restricted_set = set()
 
-	temp_ticks += ticks[restricted_list[-1]+1:]
-	ticks = temp_ticks
-	
-	with open('price_index_list.txt', 'wb') as f:
-		pickle.dump(ticks, f)
+    for r in enumerate(bad_rows):
+        restricted_set.add(int(r[1][0].item()/4))
 
-	data_temp2 = torch.zeros((int(data_temp.size()[0]*3/4)-len(restricted_set)*3, data_temp.size()[1] ))
-	c_prime = 0
-	for c in range(0, t):
-		if c not in restricted_set:
+    restricted_list = list(restricted_set)
+    restricted_list.sort()
+    temp_ticks = []
+    temp_ticks += ticks[:restricted_list[0]]
+    for r in range(1, len(restricted_list)):
+        temp_ticks += ticks[restricted_list[r-1]+1:restricted_list[r]]
 
-			data_temp2[3*c_prime] = data_temp[4*c]
-			data_temp2[3*c_prime+1] = torch.sub(data_temp[4*c+1], data_temp[4*c+2])
-			data_temp2[3*c_prime+2] = data_temp[4*c+3]
-			c_prime += 1
+    temp_ticks += ticks[restricted_list[-1]+1:]
+    ticks = temp_ticks
 
-	data = torch.zeros((data_temp2.size()[0], data_temp2.size()[1]-1 ))
-	for p in range(1, data_temp2.size()[1]):
-		data[:, p-1] = torch.div(torch.sub(data_temp2[:,p], data_temp2[:,p-1]), data_temp2[:,p-1])
+    with open('price_index_list.txt', 'wb') as f:
+        pickle.dump(ticks, f)
 
-	m_cap = pd.read_csv(inpath_cap)
+    data_temp2 = torch.zeros((int(data_temp.size()[0] * 3/4) -
+                              len(restricted_set)*3, data_temp.size()[1]))
+    c_prime = 0
+    for c in range(0, t):
+        if c not in restricted_set:
 
-	def make_col(row):
-		return str(row['datadate'])[0:4] + '-' + str(row['datadate'])[4:6] + '-' +  str(row['datadate'])[6:8]
-	
-	m_cap['date'] = m_cap.apply(lambda row: make_col(row), 1)
-	match_date = []
-	cutoff = datetime.datetime.strptime('2018-01-01', '%Y-%m-%d')
-	
-	removal_list = []
-	for ticker in ticks:
-		od = m_cap.loc[m_cap['tic'] == ticker]['date'].unique()
-		failed = True
-		for date in df.loc[df['Name']==ticker]['date'].unique():
-			if date in od:
-				print(ticker)
-				match_date.append(date)
-				failed = False
-				break
-		if failed:
-			print('failed {}'.format(ticker))
-			removal_list.append(ticker)
+            data_temp2[3*c_prime] = data_temp[4*c]
+            data_temp2[3*c_prime+1] = torch.sub(data_temp[4*c+1],
+                                                data_temp[4*c+2])
+            data_temp2[3*c_prime+2] = data_temp[4*c+3]
+            c_prime += 1
 
+    data = torch.zeros((data_temp2.size()[0], data_temp2.size()[1]-1))
+    for p in range(1, data_temp2.size()[1]):
+        data[:, p-1] = torch.div(data_temp2[:, p], data_temp2[:, p-1])
 
+    m_cap = pd.read_csv(inpath_cap)
 
-	print(len(match_date))
-	cap_data = torch.zeros((int(data_temp2.size()[0]/3)-len(removal_list), data_temp2.size()[1]-1))
-	dates = list(df['date'].unique())
+    def make_col(row):
+        return str(row['datadate'])[0:4] + '-' + (str(row['datadate'])[4:6] +
+                                                  '-' + str(row['datadate'])
+                                                  [6:8])
 
-	rectifier = 0
-	for t in range(0, len(ticks)):
+    m_cap['date'] = m_cap.apply(lambda row: make_col(row), 1)
+    match_date = []
 
-		if ticks[t] not in removal_list:
-			start = dates.index(match_date[t-rectifier])
-			cap_data[t-rectifier][start] = m_cap.loc[(m_cap['date'] == match_date[t-rectifier]) & (m_cap['tic'] == ticks[t])]['mkvaltq'].iloc[0]
+    removal_list = []
+    for ticker in ticks:
+        od = m_cap.loc[m_cap['tic'] == ticker]['date'].unique()
+        failed = True
+        for date in df.loc[df['Name'] == ticker]['date'].unique():
+            if date in od and not math.isnan(m_cap.loc[(m_cap['date'] == date)
+                                                       & (m_cap['tic'] ==
+                                                          ticker)]
+                                             ['mkvaltq'].iloc[0]):
+                print(ticker)
+                match_date.append(date)
+                failed = False
+                break
+        if failed:
+            print('failed {}'.format(ticker))
+            removal_list.append(ticker)
 
-			for tm in range(1, data_temp2.size()[1]-1 - start):
-				cap_data[t-rectifier][tm+start] = torch.mul(cap_data[t-rectifier,tm+start-1], data[3*t][start + tm])
+    cap_data = torch.zeros((int(data_temp2.size()[0]/3)-len(removal_list),
+                            data.size()[1]))
+    dates = list(df['date'].unique())
+    dates.sort()
+    with open('dates.txt', 'wb') as f:
+        pickle.dump(dates, f)
 
-			for tm in range(1, start+1):
-				cap_data[t-rectifier][tm-start] = torch.div(cap_data[t-rectifier,tm-start+1], data[3*t][start - tm])
+    rct = 0
+    for t in range(0, len(ticks)):
 
-			print(t)
-		else:
-			rectifier += 1
+        if ticks[t] not in removal_list:
+            start = dates.index(match_date[t-rct])
 
-	ticks = [t for t in ticks if t not in removal_list]
-	with open('size_index_list.txt', 'wb') as f:
-		pickle.dump(ticks, f)
+            cap_data[t-rct][start] = (m_cap.loc[(m_cap['date'] ==
+                                                match_date[t-rct]) &
+                                                (m_cap['tic']
+                                                == ticks[t])]
+                                      ['mkvaltq'].iloc[0])
 
-	return cap_data
+            for tm in range(1, data_temp2.size()[1] - 1 - start):
+                cap_data[t - rct][tm + start] = torch.mul(cap_data[t -
+                                                                   rct,
+                                                                   tm +
+                                                                   start - 1],
+                                                          data[3 * t]
+                                                          [start + tm])
+
+            for tm in range(0, start):
+
+                cap_data[t-rct][start-tm-1] = torch.div(cap_data[t - rct,
+                                                                 start-tm],
+                                                        data[3*t][start - tm])
+
+            print(t)
+        else:
+            rct += 1
+
+    ticks = [t for t in ticks if t not in removal_list]
+    with open('size_index_list.txt', 'wb') as f:
+        pickle.dump(ticks, f)
+
+    return cap_data
+
 
 if __name__ == '__main__':
-	
-	data = read_in_data('archive/all_stocks_5yr.csv')
-	torch.save(data, 'data.pt')
-	cap_data = make_mark_cap('archive/all_stocks_5yr.csv', 'market_cap.csv')
-	torch.save(cap_data, 'm_cap.pt')
-
+    '''
+    data = read_in_data('archive/all_stocks_5yr.csv')
+    torch.save(data, 'data.pt')
+    '''
+    cap_data = make_mark_cap('archive/all_stocks_5yr.csv', 'market_cap.csv')
+    torch.save(cap_data, 'm_cap.pt')

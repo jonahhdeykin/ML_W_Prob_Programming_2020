@@ -23,7 +23,6 @@ def predict_n_forward(DTSBN_net, states, n):
                                                           states_past[st+1],
                                                           st)
             states_present.append(st_mid.clone())
-
         st_bot = torch.zeros((DTSBN_net.dims[-1], 1))
         st_bot[:, 0] = DTSBN_net.sample_bottom_layer_gen(states_present[-1],
                                                          states_past[-1])
@@ -35,7 +34,7 @@ def predict_n_forward(DTSBN_net, states, n):
                                          states_present[st]), 1)
 
         states_present = []
-        movements[:, forward] = states_past[-1][:, 0]
+        movements[:, forward] = states_past[-1][:, -1]
 
     return movements
 
@@ -165,6 +164,8 @@ def graph_rets(actual_d, data_recovery_path, DTSBN_net, n_preds, n_forward):
     with open(data_recovery_path, 'rb') as f:
         data_recov = pickle.load(f)
 
+    dims = DTSBN_net.dims
+    steps_back = DTSBN_net.nt
     states = []
     for st in range(0, len(dims)):
         states.append(torch.zeros((dims[st], steps_back)))
@@ -214,6 +215,8 @@ def graph_vars(actual_d, data_recovery_path, DTSBN_net, n_preds, n_forward):
     with open(data_recovery_path, 'rb') as f:
         data_recov = pickle.load(f)
 
+    dims = DTSBN_net.dims
+    steps_back = DTSBN_net.nt
     states = []
     for st in range(0, len(dims)):
         states.append(torch.zeros((dims[st], steps_back)))
@@ -260,14 +263,12 @@ def graph_vars(actual_d, data_recovery_path, DTSBN_net, n_preds, n_forward):
 
 
 def graph_change(predicted, actual, dates, n_forward):
-    sigs = torch.sqrt(torch.var(predicted, 1))
     means = torch.mean(predicted, 1)
-    t = [day for day in range(0, sigs.size()[0])]
+    t = [day for day in range(0, means.size()[0])]
 
     fig, ax = plt.subplots(1)
     ax.plot(t, means, label='Predicted', color='orange')
     ax.plot(t, actual, label='Actual', color='blue')
-    ax.fill_between(t, means+sigs, means - sigs, facecolor='blue', alpha=0.5)
     plt.xticks([0, int((actual.size()[0]-1)/4),
                 int((actual.size()[0]-1)/4)*2,
                 int((actual.size()[0]-1)/4)*3, actual.size()[0]-1],
@@ -321,45 +322,27 @@ def graph_prob(predicted, actual, level, dates, n_forward):
     fig.tight_layout()
     plt.show()
 
-
 if __name__ == '__main__':
 
-    configs = torch.load('hyperband_2.pt')
-    config = configs[0]
-    data_size = 1404
-    steps_back = int(config[3].item())
-    levels = int(config[2].item())
-    factor = config[1].item()
-    dims = [data_size]
-    for _ in range(0, levels):
-        dims.append(max(1, int(dims[-1]/factor)))
+    graph_rets(data[:,int(data.size()[1]*2/3):], 'data_recovery.txt', DTSBN_net, 1100, n_forward)
 
-    DDBL_net = DTSBN.DDBL(dims)
-    dims.reverse()
-    DTSBN_net = DTSBN.DTSBN(dims, levels, steps_back)
-    DTSBN_net.load_weights('DTSBN_toy_model.pt')
-    DDBL_net.load_state_dict(torch.load('DDBL_toy_model.pt'))
-
-    data = torch.load('data.pt')
-    train_data = data[:, :int(data.size()[1]*2/3)]
-    '''
-    train_time = 15
-    DTSBN.Adam(DTSBN_net, DDBL_net, train_data, MSELoss(), t_max = 15, Noisy=False)
-    DTSBN_net.save_model('DTSBN_toy_model.pt')
-    torch.save(DDBL_net.state_dict(), 'DDBL_toy_model.pt')
-    '''
-    n_reps = 3
-    n_forward = 1
-    graph_vars(data[:,int(data.size()[1]*2/3):], 'data_recovery.txt', DTSBN_net, 600, n_forward)
-
-    samples = sample_n_forward(DTSBN_net, 'data.pt', int(data.size()[1]*2/3), 3, 5, steps_back)
+    samples = sample_n_forward(DTSBN_net, 'data.pt', int(data.size()[1]*2/3), n_reps, n_forward, steps_back)
 
     prices = generate_prices(samples, 'unnormalized_data.pt', 'data_recovery.txt')
 
     predicted, actual = check_val_weighted_return('unnormalized_data.pt', prices, n_forward, 'm_cap.pt', 'price_index_list.txt', 'size_index_list.txt')
 
+    means = torch.mean(predicted, 1)
+
+    count = 0
+
+    for i in range(0, means.size()[0]):
+        if means[i].item() * actual[i].item() > 0:
+            count += 1
+
+    print(count/means.size()[0])
     with open('dates.txt', 'rb') as f:
         dates = pickle.load(f)
-    graph_prob(predicted, actual, -0.02, dates, n_forward)
+    graph_change(predicted, actual,  dates, n_forward)
 
 

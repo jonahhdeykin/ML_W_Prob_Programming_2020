@@ -114,7 +114,6 @@ class DTSBN():
                                                          (3*(index + 1))]
                                                         [:, :, i], v_p[:, -1-i
                                                                        ])))
-
         return (torch.bernoulli
                 (self.sig(torch.matmul
                           (self.weights_dict
@@ -125,7 +124,7 @@ class DTSBN():
         acc_u = torch.zeros((self.dims[-1], ))
         acc_v = torch.zeros((self.dims[-1], ))
 
-        for i in range(0, self.nt):
+        for i in range(1, self.nt):
             acc_u = torch.add(acc_u, torch.matmul
                               (self.weights_dict
                                ['w_{}'.format(3*self.n_layers + 1)]
@@ -134,7 +133,6 @@ class DTSBN():
                               (self.weights_dict
                                ['w_{}'.format(3*self.n_layers + 3)]
                                [:, :, i], v_p[:, -1-i]))
-
         return (torch.normal
                 ((acc_u + torch.matmul
                   (self.weights_dict['w_{}'.format(3*self.n_layers - 1)],

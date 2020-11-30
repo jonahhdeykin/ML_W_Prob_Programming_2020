@@ -1117,7 +1117,7 @@ if __name__ == '__main__':
     candidates = bayesian.run( ((1, 10), (1, 6), (1, 6)), data, 7, 13, 2538)
 
     torch.save(candidates, 'bayesian_op_3.pt')
-    '''
+
     best = []
     best_loss = -5000
     for nl in range(1, 4):
@@ -1136,7 +1136,7 @@ if __name__ == '__main__':
 
     with open('grid_final.txt', 'wb') as f:
         pickle.dump(best, f)
-
+    '''
 
     configs_bayes = torch.load('bayesian_op_3.pt')
     _, sorted_indicies = torch.sort(configs_bayes[1])
@@ -1164,9 +1164,10 @@ if __name__ == '__main__':
     train_data = data[:, :int(data.size()[1]*2/3)]
 
     train_time = 90*60
+    #Adam(DTSBN_net, DDBL_net, train_data, nn.MSELoss(), t_max = train_time, Noisy=False)
+    DTSBN_net.load_weights('Bayes_op_model_DTSBN.pt')
     Adam(DTSBN_net, DDBL_net, train_data, nn.MSELoss(), t_max = train_time, Noisy=False)
-    DTSBN_net.save_model('Bayes_op_model_DTSBN.pt')
-    torch.save(DDBL_net.state_dict(), 'Bayes_op_model_DDBL.pt')
+    #torch.save(DDBL_net.state_dict(), 'Bayes_op_model_DDBL.pt')
 
     configs_hyper = torch.load('hyperband_3.pt')
     _, idx = torch.max(configs_hyper, 0)

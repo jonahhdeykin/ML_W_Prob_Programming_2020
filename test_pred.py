@@ -205,6 +205,7 @@ def graph_rets(actual_d, data_recovery_path, DTSBN_net, n_preds, n_forward):
     sns.distplot(gen_rets, hist=False, kde=True,
                  norm_hist=True, label='Generated')
 
+    plt.legend()
     plt.show()
 
 
@@ -258,6 +259,7 @@ def graph_vars(actual_d, data_recovery_path, DTSBN_net, n_preds, n_forward):
     sns.distplot(gen_vars, hist=False, kde=True,
                  norm_hist=True, label='Generated')
 
+    plt.legend()
     plt.show()
 
 
@@ -282,41 +284,20 @@ def graph_change(predicted, actual, dates, n_forward):
     plt.show()
 
 
-def graph_prob(predicted, actual, level, dates, n_forward):
+def show_prob(predicted, actual, level):
     sigs = torch.sqrt(torch.var(predicted, 1))
     means = torch.mean(predicted, 1)
-    t = [day for day in range(0, sigs.size()[0])]
-    levels = [level for day in range(0, sigs.size()[0])]
     probs = [100*norm.cdf((level - means[day].item())/sigs[day].item())
              for day in range(0, sigs.size()[0])]
 
-    fig, ax1 = plt.subplots()
-    color = 'blue'
-    ax1.set_xlabel('Date')
-    ax1.set_ylabel('Return', color=color)
-    l1 = ax1.plot(t, actual, color=color, label='Actual Change')
-    ax1.tick_params(axis='y', labelcolor=color)
-    l2 = ax1.plot(t, levels, color='red', label='Threshold')
+    crash_probs = []
+    no_crash_probs = []
 
-    ax2 = ax1.twinx()
+    for day in range(0, actual.size()[0]):
+        if actual[day] < level:
+            crash_probs.append(probs[day])
+        else:
+            no_crash_probs.append(probs[day])
 
-    color = 'orange'
-    ax2.set_ylabel('Crash Probability', color=color)
-    l3 = ax2.plot(t, probs, color=color, label='Crash Probability')
-    ax2.tick_params(axis='y', labelcolor=color)
-    plt.xticks([0, int((actual.size()[0]-1)/4), int((actual.size()[0]-1)/4)*2,
-                int((actual.size()[0]-1)/4)*3, actual.size()[0]-1],
-               [dates[-actual.size()[0]],
-                dates[-actual.size()[0]+int((actual.size()[0]-1)/4)],
-                dates[-actual.size()[0]+int((actual.size()[0]-1)/4)*2],
-                dates[-actual.size()[0]+int((actual.size()[0]-1)/4)*3],
-                dates[-1]])
-
-    ax2.set_title('{} Day Crash Probabilities'.format(n_forward))
-    ls = l1+l2+l3
-    labs = []
-    for line in ls:
-        labs.append(line.get_label())
-    ax1.legend(ls, labs, bbox_to_anchor=(1.07, 1), loc='upper left')
-    fig.tight_layout()
-    plt.show()
+    return (sum(crash_probs)/len(crash_probs),
+            sum(no_crash_probs)/len(no_crash_probs))

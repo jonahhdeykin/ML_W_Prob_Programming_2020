@@ -10,6 +10,8 @@ import math
 import pickle
 import time
 import numpy as np
+from copy import deepcopy
+torch.manual_seed(1)
 
 
 # The data dependent baseline for gradient noise reduction
@@ -85,7 +87,7 @@ class DTSBN():
 
         self.n_layers = n_layers
         self.DDBL = None
-        self.dims = dims
+        self.dims = deepcopy(dims)
         self.v = None
         self.c = None
         self.alpha = 0.8
